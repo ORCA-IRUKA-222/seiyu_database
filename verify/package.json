@@ -1,0 +1,16 @@
+{
+  "name": "seigura-db-verify",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "node verify.mjs && node verify_migration.mjs",
+    "verify": "node verify.mjs",
+    "verify:migration": "node verify_migration.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "seigura.com DB schema verification (PGlite)",
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.11"
+  }
+}
