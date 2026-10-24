@@ -25,6 +25,7 @@ from .models import JST, fmt_jst
 from .parser import parse_text
 from .report import print_summary, write_reports
 from .store import Store
+from .variants import expand_queries
 
 
 def _now() -> str:
@@ -45,6 +46,8 @@ def _config(args) -> Config:
         cfg.backfill_max_pages = args.max_pages
     if getattr(args, "anonymize", False):
         cfg.anonymize = True
+    if cfg.synonyms:  # 表記ゆれを登録していれば、検索語を広げる
+        cfg.queries = expand_queries(cfg.queries, cfg.synonyms)[0]
     cfg.validate()
     return cfg
 
@@ -182,29 +185,45 @@ def cmd_doctor(args) -> int:
         print("NG: ページ内に投稿データ（__NEXT_DATA__）が見つかりません。Yahoo のページ構造が変わった可能性があります。")
         print(f"   保存したファイル {saved} を開発者に共有してください。")
         return 1
-    print(f"{'OK' if r.posts else 'NG'}: 投稿 {len(r.posts)}件を読み取りました（次ページ用ID: {r.cursor}）")
+    print(f"{'OK' if r.posts else 'NG'}: 投稿 {len(r.posts)}件を読み取りました（新着順の一覧 {len(r.timeline)}件）")
     for p in r.posts[:3]:
         print(f"   - {fmt_jst(p.created_at)} @{p.screen_name} ♥{p.likes} RP{p.retweets}: {p.text[:50]}")
     if r.posts and r.posts[0].raw:
         print(f"   元データの項目: {', '.join(sorted(r.posts[0].raw))}")
-    if not r.posts or not r.cursor:
-        return 1
+    ids = sorted(int(p.id) for p in r.timeline if p.id.isdigit())
+    if len(ids) < 2:
+        return 1 if not r.posts else 0
     print("過去分のさかのぼり取得を試します…")
-    try:
-        older = client.fetch_older(query, r.cursor, len(r.posts) + 1)
-    except FetchError as e:
-        print(f"NG: {e}")
-        print("   → 最新分の定期取得だけで動きます。取りこぼし分は HAR の import で補えます。")
-        return 0
+    with Store(":memory:") as scratch:
+        collector = Collector(client, scratch, [query], log=lambda m: None)
+        try:
+            older, overlapped = collector.request_older(query, ids[0], ids[1], len(ids))
+        except FetchError as e:
+            print(f"NG: {e}")
+            print("   → 最新分の定期取得だけで動きます。取りこぼし分は HAR の import で補えます。")
+            return 0
     saved_older = debug_dir / f"older_{stamp}.txt"
     saved_older.write_text(older.body, encoding="utf-8")
-    new_ids = {p.id for p in older.result.posts} - {p.id for p in r.posts}
-    if new_ids:
-        print(f"OK: さらに古い投稿 {len(new_ids)}件を取得できました → {saved_older}")
+    new_ids = {p.id for p in older.result.timeline} - {str(i) for i in ids}
+    if new_ids and overlapped:
+        print(f"OK: さらに古い投稿 {len(new_ids)}件を、間を飛ばさずに取得できました（方式: {collector.page_mode}）")
+    elif new_ids:
+        print(f"注意: さらに古い投稿 {len(new_ids)}件を取得できましたが、ページの間を飛ばしていないか確かめられませんでした"
+              f" → {saved_older}")
     else:
         print(f"NG: 古い投稿を取得できませんでした → {saved_older}")
         print("   → 最新分の定期取得だけで動きます。取りこぼし分は HAR の import で補えます。")
     return 0
+
+
+def cmd_gui(args) -> int:
+    try:
+        from .gui import main as gui_main
+    except ImportError as e:
+        print(f"画面を開けません（{e}）。python.org の Python を「tcl/tk and IDLE」付きで入れ直してください。",
+              file=sys.stderr)
+        return 2
+    return gui_main()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -241,6 +260,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("files", nargs="+", help="取り込むファイル（*.har など）")
     p.add_argument("--label", help="取り込んだ投稿に付ける検索語ラベル")
     p.set_defaults(func=cmd_import)
+
+    p = sub.add_parser("gui", help="検索条件を入力する画面を開く")
+    p.set_defaults(func=cmd_gui)
 
     p = sub.add_parser("doctor", help="Yahoo から取得・解析できるかを診断する")
     common(p, period=False)

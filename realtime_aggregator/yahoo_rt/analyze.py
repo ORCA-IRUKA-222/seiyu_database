@@ -17,8 +17,14 @@ from .textutil import (
     normalize,
     tokenize,
 )
+from .variants import query_terms
 
 BUCKET_STEPS = (1, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440)
+# グッズやチケットの取引の投稿（【交換】、譲：〇〇 求：〇〇 など）。照合は normalize 後の本文に対して行う
+TRADE_RE = re.compile(
+    r"【\s*(交換|譲渡?|求|取引)\s*】|交換(希望|可能|募集|お願い)|(^|\s)(譲|求)\s*[:)]|(^|\s)(譲|求)\s"
+    r"|譲渡|お譲り|譲ります|求む"
+)
 MAX_BUCKETS = 300
 TOP_POSTS = 20
 JST_OFFSET = 9 * 3600
@@ -42,6 +48,7 @@ class Analysis:
     loaded: int
     excluded: Counter
     posts: list[Post]
+    classified: list[tuple[Post, str | None]]  # 読み込んだすべての投稿と、集計から外した理由
     unique_users: int
     bucket_minutes: int
     timeline: list[tuple[int, int]]
@@ -64,31 +71,35 @@ class Analysis:
         return max(self.timeline, key=lambda b: b[1])
 
 
-def filter_posts(posts: list[Post], cfg: Config) -> tuple[list[Post], Counter]:
-    ex_users = {normalize(u.lstrip("@")) for u in cfg.exclude_users if u}
-    ex_words = [normalize(w) for w in cfg.exclude_words if w]
-    excluded: Counter = Counter()
+def classify(posts: list[Post], cfg: Config) -> list[tuple[Post, str | None]]:
+    """投稿ごとに、集計から外す理由を決める（集計するものは None）。"""
+    ex_users = {normalize(u.strip().lstrip("@")) for u in cfg.exclude_users if u.strip()}
+    ex_words = [normalize(w) for w in cfg.exclude_words if w.strip()]
     seen: set[str] = set()
-    kept = []
+    out: list[tuple[Post, str | None]] = []
     for p in posts:
         text = normalize(p.text)
+        reason = None
         if ex_users and normalize(p.screen_name) in ex_users:
-            excluded["除外アカウント"] += 1
-            continue
-        if cfg.exclude_retweets and text.startswith("rt @"):
-            excluded["リポスト"] += 1
-            continue
-        if any(w in text for w in ex_words):
-            excluded["除外ワード"] += 1
-            continue
-        if cfg.dedupe_same_text:
+            reason = "除外アカウント"
+        elif cfg.exclude_retweets and text.startswith("rt @"):
+            reason = "リポスト"
+        elif cfg.exclude_trades and TRADE_RE.search(text):
+            reason = "取引の投稿"
+        elif any(w in text for w in ex_words):
+            reason = "除外ワード"
+        elif cfg.dedupe_same_text:
             key = re.sub(r"\s+", "", MENTION_RE.sub("", URL_RE.sub("", text)))
             if key and key in seen:
-                excluded["同じ本文の重複"] += 1
-                continue
+                reason = "同じ本文の重複"
             seen.add(key)
-        kept.append(p)
-    return kept, excluded
+        out.append((p, reason))
+    return out
+
+
+def filter_posts(posts: list[Post], cfg: Config) -> tuple[list[Post], Counter]:
+    classified = classify(posts, cfg)
+    return [p for p, r in classified if r is None], Counter(r for _, r in classified if r)
 
 
 def choose_bucket_minutes(span_seconds: int, requested: int) -> int:
@@ -138,19 +149,21 @@ def count_hashtags(posts: list[Post]) -> Counter:
 
 def count_words(posts: list[Post], cfg: Config) -> Counter:
     stop = BASE_STOPWORDS | {normalize(w) for w in cfg.stopwords}
-    # 検索語そのもの（とその一部）はどの投稿にも出るのでランキングから外す
-    query_terms = [normalize(q).lstrip("#") for q in [*cfg.queries, cfg.event_name] if q]
+    # 検索語そのもの（とその一部・表記ゆれ）はどの投稿にも出るのでランキングから外す
+    terms = query_terms([*cfg.queries, cfg.event_name], cfg.synonyms)
     counts: Counter = Counter()
     for p in posts:
         for w in set(tokenize(p.text)):
-            if w in stop or any(w in q for q in query_terms):
+            if w in stop or any(w in t or t in w for t in terms):
                 continue
             counts[w] += 1
     return counts
 
 
 def analyze(posts: list[Post], cfg: Config) -> Analysis:
-    kept, excluded = filter_posts(posts, cfg)
+    classified = classify(posts, cfg)
+    kept = [p for p, r in classified if r is None]
+    excluded = Counter(r for _, r in classified if r)
     span = (kept[-1].created_at - kept[0].created_at) if kept else 0
     bucket = choose_bucket_minutes(span, cfg.bucket_minutes)
     users = {p.screen_name or p.user_id for p in kept if p.screen_name or p.user_id}
@@ -166,6 +179,7 @@ def analyze(posts: list[Post], cfg: Config) -> Analysis:
         loaded=len(posts),
         excluded=excluded,
         posts=kept,
+        classified=classified,
         unique_users=len(users),
         bucket_minutes=bucket,
         timeline=build_timeline(kept, bucket),

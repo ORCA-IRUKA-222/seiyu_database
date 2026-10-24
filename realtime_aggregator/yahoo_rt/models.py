@@ -31,6 +31,7 @@ class Post:
     hashtags: list[str] = field(default_factory=list)
     media_count: int = 0
     raw: dict | None = None
+    queries: list[str] = field(default_factory=list)  # この投稿が見つかった検索語（保存済みのものだけ）
 
     @property
     def created_jst(self) -> dt.datetime:

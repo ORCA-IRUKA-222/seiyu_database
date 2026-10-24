@@ -50,6 +50,25 @@ def _write_csv(path: Path, header: list[str], rows) -> Path:
     return path
 
 
+def _write_hits(path: Path, classified: list[tuple[Post, str | None]], names: _Names) -> Path:
+    return _write_csv(
+        path,
+        HITS_HEADER,
+        (
+            [fmt_jst(p.created_at, "%Y-%m-%d %H:%M:%S"), p.id, names.screen(p), names.display(p), p.text,
+             p.likes, p.retweets, p.quotes, p.replies, " ".join("#" + h for h in p.hashtags),
+             " / ".join(p.queries), "対象" if reason is None else "除外", reason or "", names.link(p)]
+            for p, reason in classified
+        ),
+    )
+
+
+def write_hits_csv(path: Path, classified: list[tuple[Post, str | None]], anonymize: bool = False) -> Path:
+    """検索で見つかったすべての投稿を、集計から外したものも理由つきで CSV に書く。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return _write_hits(path, classified, _Names(anonymize))
+
+
 def write_reports(a: Analysis, out_dir: Path, anonymize: bool = False) -> dict[str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     names = _Names(anonymize)
@@ -81,6 +100,7 @@ def write_reports(a: Analysis, out_dir: Path, anonymize: bool = False) -> dict[s
             + [["注目ワード", g.label, g.count, round(g.share * 100, 1), " / ".join(g.terms)] for g in a.keywords],
         ),
     }
+    paths["all_hits"] = _write_hits(out_dir / "all_hits.csv", a.classified, names)
     paths["html"] = out_dir / "report.html"
     paths["html"].write_text(render_html(a, names), encoding="utf-8")
     return paths
@@ -92,6 +112,10 @@ def write_reports(a: Analysis, out_dir: Path, anonymize: bool = False) -> dict[s
 # 外部ファイルは読み込まないので、オフラインでも同じ見た目になる。
 
 WEEKDAYS = "月火水木金土日"
+TICK_MINUTES = (10, 20, 30, 60, 120, 180, 360, 720, 1440, 2880, 10080)
+JST_OFFSET = 9 * 3600
+HITS_HEADER = ["投稿日時", "投稿ID", "アカウント", "表示名", "本文", "いいね", "リポスト", "引用", "返信",
+               "ハッシュタグ", "一致した検索語", "集計", "除外した理由", "URL"]
 TOP_POSTS_SHOWN = 10
 
 CSS = """
@@ -259,14 +283,18 @@ def _column_chart(a: Analysis) -> str:
             f'title="{_hm(t)}〜 {c:,}件">{label}</div>'
         )
     multi_day = _dt(tl[0][0]).date() != _dt(tl[-1][0]).date()
-    every = max(1, math.ceil(n / (5 if multi_day else 8)))
+    # 目盛りは 0:00・3:00 のようなちょうどの時刻に置く。棒の左端がその時刻
+    span = (n * a.bucket_minutes)
+    tick = next((m for m in TICK_MINUTES if m >= a.bucket_minutes and span / m <= (5 if multi_day else 8)),
+                TICK_MINUTES[-1])
     xlabels = []
-    for i in range(0, n, every):
-        t = tl[i][0]
+    for i, (t, _) in enumerate(tl):
+        if (t + JST_OFFSET) % (tick * 60):
+            continue
         d = _dt(t)
-        text = f"{d.month}/{d.day}" if a.bucket_minutes >= 1440 else (
-            f"{d.month}/{d.day} {_hm(t)}" if multi_day else _hm(t))
-        xlabels.append(f'<span style="left:{(i + 0.5) / n * 100:.3f}%">{text}</span>')
+        text = f"{d.month}/{d.day}" if tick >= 1440 or (multi_day and d.hour == 0 and d.minute == 0) else (
+            f"{d.month}/{d.day} {_hm(t)}" if multi_day and tick >= 360 else _hm(t))
+        xlabels.append(f'<span style="left:{i / n * 100:.3f}%">{text}</span>')
     return (
         f'<figure class="chart" style="margin-inline:0" aria-label="{a.bucket_minutes}分ごとの投稿数">'
         '<p class="chart-unit">（件）</p>'

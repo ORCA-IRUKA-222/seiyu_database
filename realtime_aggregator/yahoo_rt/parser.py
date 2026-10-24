@@ -38,9 +38,12 @@ CURSOR_KEYS = ("oldestTweetId", "oldestId", "oldest_id")
 
 @dataclass
 class ParseResult:
-    posts: list[Post] = field(default_factory=list)
+    posts: list[Post] = field(default_factory=list)  # ページ内のすべての投稿（保存用）
     cursor: str | None = None  # これより古い投稿を取るための ID
     recognized: bool = False  # ページ内に解析できるデータがあったか
+    # 新着順の一覧に並んだ投稿。ベストポストなど一覧の外の投稿は含まない。
+    # さかのぼり取得の起点や期間の判定にはこちらを使う
+    timeline: list[Post] = field(default_factory=list)
 
 
 def _first(d: dict, keys: tuple[str, ...]):
@@ -209,13 +212,37 @@ def extract_next_data(text: str) -> dict | None:
         return None
 
 
+def find_timeline(obj) -> list[Post] | None:
+    """検索結果の一覧（"entry" の配列）を探す。見つからなければ None。"""
+    if isinstance(obj, dict):
+        entry = obj.get("entry")
+        if isinstance(entry, list):
+            posts = find_posts(entry)
+            if posts:
+                return posts
+        children = obj.values()
+    elif isinstance(obj, list):
+        children = obj
+    else:
+        return None
+    for c in children:
+        found = find_timeline(c)
+        if found is not None:
+            return found
+    return None
+
+
 def parse_data(data) -> ParseResult:
     posts = find_posts(data)
+    timeline = find_timeline(data)
+    if timeline is None:
+        timeline = posts
     cursor = find_key(data, CURSOR_KEYS)
     return ParseResult(
         posts=posts,
-        cursor=str(cursor) if cursor is not None else oldest_id(posts),
+        cursor=str(cursor) if cursor is not None else oldest_id(timeline),
         recognized=True,
+        timeline=timeline,
     )
 
 
@@ -254,4 +281,4 @@ def parse_har(har: dict, host_filter: str = "yahoo.co.jp") -> ParseResult:
                 continue
         posts.extend(parse_text(body).posts)
     posts = dedupe(posts)
-    return ParseResult(posts=posts, cursor=oldest_id(posts), recognized=True)
+    return ParseResult(posts=posts, cursor=oldest_id(posts), recognized=True, timeline=posts)

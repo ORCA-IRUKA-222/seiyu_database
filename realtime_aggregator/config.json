@@ -1,7 +1,8 @@
 {
   "_説明": "項目の意味は README.md の「設定ファイル」を見てください。日時は日本時間で書きます。",
   "event_name": "声グラハロウィーン",
-  "queries": ["声グラハロウィーン", "声グラハロウィン"],
+  "queries": ["声グラハロウィーン"],
+  "synonyms": [["声グラ", "声優グランプリ"], ["ハロウィーン", "ハロウィン"]],
   "db": "data/seigura_halloween.sqlite3",
   "out_dir": "reports",
   "since": "2026-10-24 00:00",
@@ -30,8 +31,9 @@
     "次回への期待": ["また行きたい", "来年も", "次回", "またやって", "円盤化", "第2弾"],
     "不満・要望": ["残念", "見えなかった", "聞こえなかった", "待ち時間", "混雑", "改善", "トラブル"]
   },
-  "exclude_users": [],
-  "exclude_words": ["譲渡", "お譲り", "譲ります", "譲)", "求)", "求む", "交換希望"],
+  "exclude_users": ["seigura"],
+  "exclude_words": [],
+  "exclude_trades": true,
   "stopwords": [],
   "dedupe_same_text": true,
   "exclude_retweets": true,

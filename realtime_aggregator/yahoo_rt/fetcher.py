@@ -63,8 +63,10 @@ class YahooRealtimeClient:
     def search_url(self, query: str) -> str:
         return f"{self.base_url}/search?" + urllib.parse.urlencode({"p": query, "ei": "UTF-8"})
 
-    def pagination_url(self, query: str, oldest_id: str, start: int) -> str:
-        params = {"p": query, "oldestTweetId": oldest_id, "start": start, "results": 40}
+    def pagination_url(self, query: str, oldest_id: str, start: int | None = None) -> str:
+        params: dict = {"p": query, "oldestTweetId": oldest_id}
+        if start is not None:
+            params["start"] = start
         return f"{self.base_url}{PAGINATION_PATH}?" + urllib.parse.urlencode(params)
 
     def fetch_latest(self, query: str) -> Page:
@@ -72,7 +74,7 @@ class YahooRealtimeClient:
         body = self.get(url, accept="text/html,application/xhtml+xml")
         return Page(url, body, parse_text(body))
 
-    def fetch_older(self, query: str, oldest_id: str, start: int) -> Page:
+    def fetch_older(self, query: str, oldest_id: str, start: int | None = None) -> Page:
         url = self.pagination_url(query, oldest_id, start)
         body = self.get(url, accept="application/json", referer=self.search_url(query))
         return Page(url, body, parse_text(body))

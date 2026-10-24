@@ -11,3 +11,4 @@ realtime_aggregator/reports/
 realtime_aggregator/debug/
 *.sqlite3
 *.har
+realtime_aggregator/gui_settings.json

@@ -3,7 +3,7 @@ import unittest
 from helpers import entry
 
 from yahoo_rt import textutil
-from yahoo_rt.analyze import analyze, build_timeline, choose_bucket_minutes, filter_posts, match_groups
+from yahoo_rt.analyze import analyze, build_timeline, choose_bucket_minutes, classify, filter_posts, match_groups
 from yahoo_rt.config import Config
 from yahoo_rt.models import parse_jst
 from yahoo_rt.parser import to_post
@@ -26,20 +26,33 @@ class UseFallbackTokenizer(unittest.TestCase):
 
 class FilterTest(unittest.TestCase):
     def test_exclusions(self):
-        cfg = Config(exclude_users=["@Official"], exclude_words=["譲渡"])
+        cfg = Config(exclude_users=["@Official"], exclude_words=["ネタバレ"])
         posts = [
             post(1, "楽しかった！ https://t.co/aaa"),
             post(2, "楽しかった！  https://t.co/bbb"),  # URL と空白だけ違う重複
-            post(3, "チケット譲渡します"),
+            post(3, "【交換】ランダム缶バッジ　譲　Aさん　求　Bさん"),
             post(4, "RT @someone: 楽しかった"),
             post(5, "告知です", screenName="official"),
             post(6, "ｶﾜｲｲ"),
+            post(7, "ネタバレ注意"),
+            post(8, "譲れない推しがいる"),
         ]
         kept, excluded = filter_posts(posts, cfg)
-        self.assertEqual([p.text for p in kept], ["楽しかった！ https://t.co/aaa", "ｶﾜｲｲ"])
+        self.assertEqual([p.text for p in kept], ["楽しかった！ https://t.co/aaa", "ｶﾜｲｲ", "譲れない推しがいる"])
         self.assertEqual(
-            dict(excluded), {"同じ本文の重複": 1, "除外ワード": 1, "リポスト": 1, "除外アカウント": 1}
+            dict(excluded),
+            {"同じ本文の重複": 1, "取引の投稿": 1, "除外ワード": 1, "リポスト": 1, "除外アカウント": 1},
         )
+
+    def test_trade_posts_from_real_results(self):
+        for text in [
+            "【交換】声グラハロウィーン2026 ランダム缶バッジ 求：薬師寺李有 各種 譲：青木陽菜",
+            "交換希望 声グラハロウィーン2026 ランダム缶バッジ 【求】浅見香月",
+            "（更新）交換希望 声グラ ハロウィーン 2026 ランダム缶バッジ 譲）赤丸 求）青丸",
+        ]:
+            self.assertEqual(classify([post(1, text)], Config())[0][1], "取引の投稿", text)
+        self.assertIsNone(classify([post(1, "求人と譲れない話")], Config(exclude_trades=True))[0][1])
+        self.assertIsNone(classify([post(1, "【交換】A 譲:B")], Config(exclude_trades=False))[0][1])
 
 
 class TimelineTest(unittest.TestCase):

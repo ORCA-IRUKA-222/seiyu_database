@@ -134,20 +134,34 @@ class CliTest(unittest.TestCase):
 
             def fetch_latest(self, query):
                 items = timeline[:3]
-                return Page("u", "", ParseResult(items, oldest_id(items), True))
+                return Page("u", "", ParseResult(items, oldest_id(items), True, items))
 
-            def fetch_older(self, query, oldest, start):
+            def fetch_older(self, query, oldest, start=None):
                 items = [p for p in timeline if int(p.id) < int(oldest)][:3]
-                return Page("u", "", ParseResult(items, oldest_id(items), True))
+                return Page("u", "", ParseResult(items, oldest_id(items), True, items))
 
         original = cli._client
         cli._client = lambda cfg: Client()
         self.addCleanup(setattr, cli, "_client", original)
         code, out, err = run("collect", "-c", str(self.config), "-q", "声グラハロウィーン", "--refresh", "--live-report")
         self.assertEqual(code, 0, err)
-        self.assertIn("取得 6件（2ページ）", out)
+        self.assertIn("取得 6件（3ページ）", out)
         self.assertIn("投稿数: 6件", out)
         self.assertTrue((self.dir / "reports" / "report.html").exists())
+
+    def test_doctor_checks_page_continuity(self):
+        from helpers import entry
+        from test_collector import FakeClient
+        from yahoo_rt.parser import to_post
+
+        client = FakeClient([to_post(entry(n)) for n in range(9, 0, -1)], page_size=4, model="offset")
+        client.search_url = lambda q: "https://example.invalid"
+        original = cli._client
+        cli._client = lambda cfg: client
+        self.addCleanup(setattr, cli, "_client", original)
+        code, out, err = run("doctor", "-c", str(self.config))
+        self.assertEqual(code, 0, err)
+        self.assertIn("間を飛ばさずに取得できました（方式: offset）", out)
 
 if __name__ == "__main__":
     unittest.main()

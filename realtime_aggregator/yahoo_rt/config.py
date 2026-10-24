@@ -37,6 +37,8 @@ class Config:
     reactions: dict[str, list[str]] = field(default_factory=lambda: dict(DEFAULT_REACTIONS))
     exclude_users: list[str] = field(default_factory=list)
     exclude_words: list[str] = field(default_factory=list)
+    exclude_trades: bool = True  # 【交換】や「譲：〇〇 求：〇〇」などの取引の投稿を集計から外す
+    synonyms: list[list[str]] = field(default_factory=list)  # 表記ゆれ。[["声グラ", "声優グランプリ"], ...]
     stopwords: list[str] = field(default_factory=list)
     dedupe_same_text: bool = True
     exclude_retweets: bool = True

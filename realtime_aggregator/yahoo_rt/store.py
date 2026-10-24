@@ -164,7 +164,9 @@ class Store:
             args.extend(queries)
         sql = (
             "SELECT id, created_at, text, screen_name, user_name, user_id, likes, retweets,"
-            " replies, quotes, url, hashtags, media_count FROM posts"
+            " replies, quotes, url, hashtags, media_count,"
+            " (SELECT group_concat(query, char(10)) FROM post_queries WHERE post_id = posts.id)"
+            " FROM posts"
         )
         if where:
             sql += " WHERE " + " AND ".join(where)
@@ -184,6 +186,7 @@ class Store:
                 url=r[10] or "",
                 hashtags=json.loads(r[11] or "[]"),
                 media_count=r[12] or 0,
+                queries=sorted((r[13] or "").split("\n")) if r[13] else [],
             )
             for r in self.conn.execute(sql, args)
         ]
