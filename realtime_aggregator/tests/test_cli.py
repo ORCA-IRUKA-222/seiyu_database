@@ -122,5 +122,32 @@ class CliTest(unittest.TestCase):
             self.assertEqual(store.count(), 2)
 
 
+    def test_collect_refresh_then_report(self):
+        from yahoo_rt.fetcher import Page
+        from yahoo_rt.parser import ParseResult, oldest_id, to_post
+
+        timeline = [to_post(entry(n, "2026-10-24 19:00", likesCount=n * 10)) for n in range(6, 0, -1)]
+
+        class Client:
+            def search_url(self, q):
+                return "https://example.invalid"
+
+            def fetch_latest(self, query):
+                items = timeline[:3]
+                return Page("u", "", ParseResult(items, oldest_id(items), True))
+
+            def fetch_older(self, query, oldest, start):
+                items = [p for p in timeline if int(p.id) < int(oldest)][:3]
+                return Page("u", "", ParseResult(items, oldest_id(items), True))
+
+        original = cli._client
+        cli._client = lambda cfg: Client()
+        self.addCleanup(setattr, cli, "_client", original)
+        code, out, err = run("collect", "-c", str(self.config), "-q", "声グラハロウィーン", "--refresh", "--live-report")
+        self.assertEqual(code, 0, err)
+        self.assertIn("取得 6件（2ページ）", out)
+        self.assertIn("投稿数: 6件", out)
+        self.assertTrue((self.dir / "reports" / "report.html").exists())
+
 if __name__ == "__main__":
     unittest.main()

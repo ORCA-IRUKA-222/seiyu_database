@@ -6,12 +6,15 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .fetcher import FetchError, YahooRealtimeClient
-from .models import Post
+from .models import Post, fmt_jst
 from .parser import oldest_id
 from .store import Store
 
 # ページ送りがこの回数続けて失敗したら、このセッションでは使わない
 PAGINATION_GIVE_UP = 3
+# 更新（refresh）でさかのぼる最大ページ数。since に届けばその前に止まる
+REFRESH_MAX_PAGES = 300
+PROGRESS_EVERY = 10
 
 
 @dataclass
@@ -47,10 +50,11 @@ class Collector:
     def pagination_enabled(self) -> bool:
         return self.backfill_max_pages > 0 and self.pagination_failures < PAGINATION_GIVE_UP
 
-    def run_cycle(self) -> list[QueryStats]:
-        return [self.collect_query(q) for q in self.queries]
+    def run_cycle(self, refresh: bool = False, refresh_pages: int = REFRESH_MAX_PAGES) -> list[QueryStats]:
+        return [self.collect_query(q, refresh=refresh, refresh_pages=refresh_pages) for q in self.queries]
 
-    def collect_query(self, query: str) -> QueryStats:
+    def collect_query(self, query: str, *, refresh: bool = False, refresh_pages: int = REFRESH_MAX_PAGES) -> QueryStats:
+        """最新ページを取得する。refresh のときは since までさかのぼり、既知の投稿のいいね数なども更新する。"""
         st = QueryStats(query)
         try:
             page = self.client.fetch_latest(query)
@@ -67,26 +71,35 @@ class Collector:
         st.added = self.store.upsert(posts, query)
         st.fetched, st.pages = len(posts), 1
         self.store.log_fetch(query, "latest", True, len(posts), st.added)
+        if refresh:
+            if posts:
+                self._walk_back(query, posts, page.result.cursor, st, refresh_pages, stop_at_known=False)
         # 最新ページに既知の投稿が 1 件もない ＝ 前回との間に取りこぼしがあるかもしれない
-        if posts and not known and self.pagination_enabled:
-            self._backfill(query, posts, page.result.cursor, st)
+        elif posts and not known and self.pagination_enabled:
+            self._walk_back(query, posts, page.result.cursor, st, self.backfill_max_pages, stop_at_known=True)
         return st
 
-    def _backfill(self, query: str, posts: list[Post], cursor: str | None, st: QueryStats) -> None:
+    def _walk_back(
+        self, query: str, posts: list[Post], cursor: str | None, st: QueryStats, max_pages: int, *, stop_at_known: bool
+    ) -> None:
         start = len(posts) + 1
         cursor = cursor or oldest_id(posts)
         oldest_time = min(p.created_at for p in posts)
-        for _ in range(self.backfill_max_pages):
+        for _ in range(max_pages):
             if cursor is None or (self.since is not None and oldest_time < self.since):
                 return
             try:
                 page = self.client.fetch_older(query, cursor, start)
             except FetchError as e:
                 self._pagination_failed(str(e))
+                if not stop_at_known:
+                    st.error = f"さかのぼり取得が途中で止まりました（{e}）"
                 return
             older = page.result.posts
             if not page.result.recognized:
                 self._pagination_failed("応答を解析できませんでした")
+                if not stop_at_known:
+                    st.error = "さかのぼり取得の応答を解析できませんでした"
                 return
             self.pagination_failures = 0
             if not older:
@@ -97,14 +110,16 @@ class Collector:
             st.fetched += len(older)
             st.added += added
             st.pages += 1
-            if known:  # 前回までに集めた範囲に追いついた
+            oldest_time = min(oldest_time, *(p.created_at for p in older))
+            if st.pages % PROGRESS_EVERY == 0:
+                self.log(f"  {query}: {st.pages}ページ目（{fmt_jst(oldest_time)} の投稿まで）")
+            if known and stop_at_known:  # 前回までに集めた範囲に追いついた
                 return
             next_cursor = page.result.cursor or oldest_id(older)
             if next_cursor == cursor:
                 return
             cursor = next_cursor
             start += len(older)
-            oldest_time = min(oldest_time, *(p.created_at for p in older))
 
     def _pagination_failed(self, message: str) -> None:
         self.pagination_failures += 1

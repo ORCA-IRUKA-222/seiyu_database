@@ -97,6 +97,30 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(sum(1 for k, _ in client.calls if k == "older"), 3)
         self.assertEqual(len(self.logs), 1)
 
+    def test_refresh_updates_counts_beyond_known_posts(self):
+        client = FakeClient(posts(range(10, 0, -1)))
+        c = self.make(client)
+        c.collect_query("q")
+        client.timeline = [to_post(entry(n, likesCount=100 + n)) for n in range(10, 0, -1)]
+        st = c.collect_query("q", refresh=True)
+        self.assertEqual((st.added, st.pages, st.error), (0, 4, ""))
+        likes = {int(p.id) % 1000: p.likes for p in self.store.load_posts()}
+        self.assertEqual(likes[1], 101)  # 最後のページの投稿まで更新された
+
+    def test_refresh_stops_at_since_and_reports_progress(self):
+        timeline = posts(range(60, 30, -1), "2026-10-24 18:00") + posts(range(30, 0, -1), "2026-10-24 08:00")
+        client = FakeClient(timeline)
+        c = self.make(client, since=parse_jst("2026-10-24 12:00"))
+        st = c.collect_query("q", refresh=True)
+        self.assertEqual(st.pages, 11)  # 18:00 の 30 件 + 08:00 の最初の 3 件で止まる
+        self.assertEqual(len(self.logs), 1)  # 10 ページごとの途中経過
+
+    def test_refresh_reports_pagination_failure(self):
+        client = FakeClient(posts(range(10, 0, -1)), fail_older=True)
+        st = self.make(client).collect_query("q", refresh=True)
+        self.assertIn("さかのぼり取得が途中で止まりました", st.error)
+        self.assertEqual(st.added, 3)
+
     def test_latest_failure_is_reported_not_raised(self):
         class Broken(FakeClient):
             def fetch_latest(self, query):

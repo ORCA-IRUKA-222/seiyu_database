@@ -33,7 +33,11 @@ Yahoo!リアルタイム検索に出てくる公開投稿（X の投稿）を定
    `data/seigura_halloween.sqlite3` に保存します。取得のたびに `reports/report.html` も更新されるので、
    ブラウザで開いて再読み込みすれば途中経過を見られます。止めるときは `Ctrl + C` を押します。
    イベント終了後も、感想が落ち着くまで動かしておくのがおすすめです。
-3. **`report.bat`** … 集計して、レポートをブラウザで開きます。
+3. **`refresh.bat`** … 感想が落ち着いてから、`collect.bat` を止めて実行します。`since` の時刻までさかのぼって
+   投稿を取り直し、いいね数・リポスト数を最新にしてからレポートを作ります。数分かかります。
+   collect は取得した時点の数値を保存するため、投稿直後に取り込んだものはいいね数が 0 のままです。
+   「反応の多い投稿」を正しく並べるには、最後にこれを実行してください。取りこぼした投稿も補います。
+4. **`report.bat`** … 集計して、レポートをブラウザで開きます。
 
 collect を止めて再開しても、それまでのデータに追加されます。同じ投稿は 1 件として数えます。
 
@@ -59,7 +63,7 @@ CSV は BOM 付き UTF-8 なので、Excel でダブルクリックしても文�
 | `queries` | 検索語（複数可）。表記ゆれ（ハロウィーン／ハロウィン）は両方入れておくと漏れが減ります |
 | `since` / `until` | 集計する期間。`until` を設定すると collect はその時刻に自動停止します。`null` で指定なし |
 | `interval_seconds` | 最新の投稿を取りに行く間隔（秒）。20 秒未満にはできません |
-| `backfill_max_pages` | 取りこぼしを補うとき、1 回にさかのぼる最大ページ数。`0` でさかのぼらない |
+| `backfill_max_pages` | 取りこぼしを補うとき、1 回にさかのぼる最大ページ数（1 ページ約 40 件）。`0` でさかのぼらない |
 | `request_delay_seconds` | Yahoo へのリクエストどうしの最低間隔（秒） |
 | `bucket_minutes` | 時間帯グラフの区切り（分）。期間が長いと自動で広げます |
 | `keywords` | 注目ワード。`"表示名": ["照合する語", ...]` の形。**出演者名と愛称をここに追加してください** |
@@ -106,6 +110,7 @@ py -m yahoo_rt import -c config.json 保存したファイル.har
 ```
 py -m yahoo_rt doctor  -c config.json
 py -m yahoo_rt collect -c config.json [--live-report] [--once] [--interval 秒] [--max-pages N]
+py -m yahoo_rt collect -c config.json --refresh [--live-report] [--max-pages N]
 py -m yahoo_rt report  -c config.json [--since "2026-10-24 17:00"] [--until "2026-10-25 06:00"] [--anonymize] [--open]
 py -m yahoo_rt import  -c config.json ファイル... [--label 検索語]
 ```

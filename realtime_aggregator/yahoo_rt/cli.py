@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import __version__
 from .analyze import analyze
-from .collector import Collector
+from .collector import REFRESH_MAX_PAGES, Collector
 from .config import Config, load_config
 from .fetcher import DEFAULT_USER_AGENT, FetchError, YahooRealtimeClient
 from .models import JST, fmt_jst
@@ -74,6 +74,8 @@ def cmd_collect(args) -> int:
         _client(cfg), store, cfg.queries, since=cfg.since_ts, backfill_max_pages=cfg.backfill_max_pages
     )
     stop_at = cfg.until_ts
+    if args.refresh:
+        return _refresh(args, cfg, store, collector)
     print(f"収集を開始します（{cfg.interval_seconds}秒ごと、Ctrl+C で停止）")
     print(f"検索語: {' / '.join(cfg.queries)}")
     print(f"保存先: {cfg.resolve(cfg.db)}（現在 {store.count():,}件）")
@@ -101,6 +103,27 @@ def cmd_collect(args) -> int:
         store.close()
     print(f"保存済み: {total:,}件。集計は report コマンドで行えます。")
     return 0
+
+
+def _refresh(args, cfg: Config, store: Store, collector: Collector) -> int:
+    pages = args.max_pages if args.max_pages is not None else REFRESH_MAX_PAGES
+    since = f"{fmt_jst(cfg.since_ts)} まで" if cfg.since_ts else "さかのぼれるところまで"
+    print(f"いいね数などを最新にし、取りこぼしを補います（{since}、検索語ごとに最大{pages}ページ）")
+    code = 0
+    try:
+        for st in collector.run_cycle(refresh=True, refresh_pages=pages):
+            print(f"[{_now()}] {st.query}: 取得 {st.fetched:,}件（{st.pages}ページ） / 新規 {st.added:,}件")
+            if st.error:
+                print(f"[{_now()}] {st.query}: {st.error}")
+                code = 1
+        print(f"[{_now()}] 累計 {store.count():,}件")
+        if args.live_report:
+            _make_report(cfg, store)
+    except KeyboardInterrupt:
+        print("\n更新を中断しました。ここまでの結果は保存されています。")
+    finally:
+        store.close()
+    return code
 
 
 def cmd_report(args) -> int:
@@ -203,6 +226,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-pages", type=int, help="1回にさかのぼる最大ページ数（0で無効）")
     p.add_argument("--once", action="store_true", help="1回だけ取得して終了")
     p.add_argument("--live-report", action="store_true", help="取得のたびにレポートを更新する")
+    p.add_argument("--refresh", action="store_true",
+                   help="since までさかのぼって取り直し、いいね数などを最新にして終了する")
     p.set_defaults(func=cmd_collect)
 
     p = sub.add_parser("report", help="保存した投稿を集計してレポートを作る")
