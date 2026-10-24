@@ -127,7 +127,7 @@ CSS = """
   color-scheme:light;
 }
 *{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
+html{-webkit-text-size-adjust:100%;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-weight:500;
   font-size:15px;line-height:1.8;border-top:4px solid var(--main)}
 a{color:var(--main)}
@@ -420,7 +420,8 @@ def render_html(a: Analysis, names: _Names | None = None) -> str:
     keywords_html = (
         _hbars(a.keywords, "項目ごとの照合語と投稿例")
         if a.keywords else
-        '<p class="empty-box">注目ワードが登録されていません。config.json の keywords に出演者名などを登録すると、ここに件数が出ます。</p>'
+        '<p class="empty-box">注目ワードが登録されていません。画面の「注目ワード」欄（コマンドで使う場合は config.json の keywords）に'
+        '出演者名などを登録すると、ここに件数が出ます。</p>'
     )
     reactions_html = (
         _hbars(a.reactions, "分類ごとの照合語と投稿例")
