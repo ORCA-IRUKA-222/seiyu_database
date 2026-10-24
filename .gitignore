@@ -2,3 +2,13 @@ node_modules/
 wp_dump/
 __pycache__/
 *.db
+*.pyc
+.venv/
+
+# 感想集計ツールの収集データ・出力（個人の投稿を含むためリポジトリに入れない）
+realtime_aggregator/data/
+realtime_aggregator/reports/
+realtime_aggregator/debug/
+*.sqlite3
+*.har
+realtime_aggregator/gui_settings.json
